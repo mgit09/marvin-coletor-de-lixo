@@ -1,211 +1,288 @@
-"""Testes do ambiente do robô coletor de lixo Marvin."""
+"""Ambiente simulado do robô coletor de lixo Marvin.
+
+Implementa a grade 50 x 50, a percepção local de cinco células, a função de
+transição, a função de recompensa e o reinício de episódio descritos no
+enunciado. O agente interage com o ambiente somente por meio de reset() e
+passo(), sem acesso à grade, à posição ou às probabilidades de transição.
+"""
+
+from enum import IntEnum
 
 import numpy as np
-import pytest
 
-from src.ambiente import (
-    Ambiente,
-    ResultadoPasso,
-    codificar_percepcao,
-    decodificar_percepcao,
+from src.configuracao import (
+    Acao,
+    Celula,
+    ConfiguracaoAmbiente,
+    Recompensas,
+    acoes_de_movimento,
+    deslocamento_por_acao,
+    numero_de_estados,
 )
-from src.configuracao import Acao, Celula, ConfiguracaoAmbiente, numero_de_estados
 
 
-def criar_ambiente_vazio(passos_por_episodio=1000):
-    """Cria um ambiente sem paredes nem lixo, para testes controlados.
+class ResultadoPasso(IntEnum):
+    """Classificação do que aconteceu em um passo, usada para registrar métricas."""
+
+    coleta_com_sucesso = 0
+    coleta_sem_lixo = 1
+    movimento_invalido = 2
+    outro = 3
+
+
+def codificar_percepcao(celula_atual, norte, sul, leste, oeste):
+    """Converte a quíntupla de percepção em um índice de estado.
+
+    A célula atual ocupa o dígito mais significativo (base 2, pois nunca é
+    parede) e as quatro vizinhas ocupam dígitos de base 3, na ordem norte,
+    sul, leste e oeste, com parede = 0, vazio = 1 e lixo = 2.
 
     Args:
-        passos_por_episodio: Duração do episódio.
+        celula_atual: Conteúdo da célula ocupada (vazio ou lixo).
+        norte: Conteúdo da célula ao norte.
+        sul: Conteúdo da célula ao sul.
+        leste: Conteúdo da célula a leste.
+        oeste: Conteúdo da célula a oeste.
 
     Returns:
-        Ambiente com a grade totalmente vazia e Marvin na posição inicial.
+        Índice do estado, entre 0 e numero_de_estados - 1.
+
+    Raises:
+        ValueError: Se a célula atual for parede.
     """
-    configuracao = ConfiguracaoAmbiente(
-        densidade_de_lixo=0.0,
-        densidade_de_paredes=0.0,
-        passos_por_episodio=passos_por_episodio,
-    )
-    return Ambiente(configuracao, semente=0)
+    if int(celula_atual) not in (Celula.vazio, Celula.lixo):
+        raise ValueError("A célula atual não pode ser parede")
+
+    indice = int(celula_atual)
+    for vizinha in (norte, sul, leste, oeste):
+        indice = indice * 3 + (int(vizinha) + 1)
+    return indice
 
 
-def test_codificacao_e_decodificacao_cobrem_todos_os_estados():
-    """Cada estado possui um índice único e a decodificação é inversa."""
-    percepcoes = set()
-    for indice in range(numero_de_estados):
-        percepcao = decodificar_percepcao(indice)
-        assert codificar_percepcao(*percepcao) == indice
-        percepcoes.add(percepcao)
-    assert len(percepcoes) == numero_de_estados
+def decodificar_percepcao(indice_do_estado):
+    """Converte um índice de estado de volta na quíntupla de percepção.
+
+    Operação inversa de codificar_percepcao(), útil para analisar a política
+    aprendida (Tarefa 5).
+
+    Args:
+        indice_do_estado: Índice do estado, entre 0 e numero_de_estados - 1.
+
+    Returns:
+        Tupla (celula_atual, norte, sul, leste, oeste) com valores de Celula.
+
+    Raises:
+        ValueError: Se o índice estiver fora do intervalo válido.
+    """
+    if not 0 <= indice_do_estado < numero_de_estados:
+        raise ValueError("Índice de estado fora do intervalo válido")
+
+    resto = int(indice_do_estado)
+    vizinhas = []
+    for _ in range(4):
+        resto, digito = divmod(resto, 3)
+        vizinhas.append(Celula(digito - 1))
+    vizinhas.reverse()
+    return (Celula(resto), *vizinhas)
 
 
-def test_codificacao_rejeita_parede_na_celula_atual():
-    """A célula atual nunca pode ser parede."""
-    with pytest.raises(ValueError):
-        codificar_percepcao(Celula.parede, 0, 0, 0, 0)
+class Ambiente:
+    """Grade bidimensional em que Marvin coleta lixo.
 
+    A disposição das paredes é sorteada uma única vez, na criação do ambiente,
+    e permanece fixa. O lixo é sorteado novamente a cada reset(). A densidade
+    de paredes é a fração das células da grade, e a densidade de lixo é a
+    fração das células livres.
 
-def test_reset_posiciona_marvin_na_origem_sem_parede():
-    """O episódio sempre começa em (0, 0), que está livre de parede."""
-    for semente in range(20):
-        ambiente = Ambiente(semente=semente)
-        estado = ambiente.reset()
-        assert ambiente.posicao == (0, 0)
-        assert ambiente.grade[0, 0] != Celula.parede
-        assert 0 <= estado < numero_de_estados
+    Attributes:
+        configuracao: Parâmetros do ambiente.
+        recompensas: Valores de recompensa.
+        gerador: Gerador de números aleatórios com semente própria.
+        paredes: Matriz booleana [y, x] indicando as paredes.
+        grade: Matriz [y, x] com os códigos de Celula da grade atual.
+        posicao: Posição (x, y) atual de Marvin.
+        passo_atual: Quantidade de passos executados no episódio.
+    """
 
+    def __init__(self, configuracao=None, recompensas=None, semente=None):
+        """Cria o ambiente, sorteia as paredes e inicia o primeiro episódio.
 
-def test_mesma_semente_gera_o_mesmo_ambiente():
-    """A reprodutibilidade depende da semente."""
-    primeiro = Ambiente(semente=7)
-    segundo = Ambiente(semente=7)
-    assert np.array_equal(primeiro.grade, segundo.grade)
+        Args:
+            configuracao: Parâmetros do ambiente. Usa o padrão se for None.
+            recompensas: Valores de recompensa. Usa o padrão se for None.
+            semente: Semente do gerador aleatório, para reprodutibilidade.
+        """
+        self.configuracao = configuracao or ConfiguracaoAmbiente()
+        self.recompensas = recompensas or Recompensas()
+        self._validar_configuracao()
 
+        self.gerador = np.random.default_rng(semente)
+        self.paredes = self._gerar_paredes()
+        self.grade = None
+        self.posicao = None
+        self.passo_atual = 0
+        self.reset()
 
-def test_reset_mantem_paredes_e_redistribui_lixo():
-    """Paredes são fixas e o lixo muda a cada episódio."""
-    ambiente = Ambiente(semente=3)
-    paredes_antes = ambiente.paredes.copy()
-    grade_antes = ambiente.grade.copy()
+    def _validar_configuracao(self):
+        """Confere se os parâmetros do ambiente são coerentes.
 
-    ambiente.reset()
+        Raises:
+            ValueError: Se algum parâmetro for inválido.
+        """
+        tamanho = self.configuracao.tamanho_da_grade
+        coluna, linha = self.configuracao.posicao_inicial
 
-    assert np.array_equal(ambiente.paredes, paredes_antes)
-    assert np.array_equal(ambiente.grade == Celula.parede, paredes_antes)
-    assert not np.array_equal(ambiente.grade, grade_antes)
+        if tamanho <= 0:
+            raise ValueError("O tamanho da grade deve ser positivo")
+        if not (0 <= coluna < tamanho and 0 <= linha < tamanho):
+            raise ValueError("A posição inicial deve estar dentro da grade")
+        if not 0.0 <= self.configuracao.densidade_de_paredes <= 1.0:
+            raise ValueError("A densidade de paredes deve estar entre 0 e 1")
+        if not 0.0 <= self.configuracao.densidade_de_lixo <= 1.0:
+            raise ValueError("A densidade de lixo deve estar entre 0 e 1")
 
+    def _gerar_paredes(self):
+        """Sorteia a disposição das paredes internas.
 
-def test_densidades_sao_proximas_das_configuradas():
-    """As frações sorteadas ficam próximas dos valores da configuração."""
-    ambiente = Ambiente(semente=1)
-    configuracao = ambiente.configuracao
-    total_de_celulas = configuracao.tamanho_da_grade**2
+        Returns:
+            Matriz booleana [y, x], com a célula inicial sempre livre.
+        """
+        tamanho = self.configuracao.tamanho_da_grade
+        sorteio = self.gerador.random((tamanho, tamanho))
+        paredes = sorteio < self.configuracao.densidade_de_paredes
 
-    fracao_de_paredes = np.sum(ambiente.paredes) / total_de_celulas
-    celulas_livres = total_de_celulas - np.sum(ambiente.paredes)
-    fracao_de_lixo = ambiente.quantidade_de_lixo_restante / celulas_livres
+        coluna, linha = self.configuracao.posicao_inicial
+        paredes[linha, coluna] = False
+        return paredes
 
-    assert abs(fracao_de_paredes - configuracao.densidade_de_paredes) < 0.03
-    assert abs(fracao_de_lixo - configuracao.densidade_de_lixo) < 0.03
+    def reset(self):
+        """Inicia um novo episódio.
 
+        Redistribui o lixo nas células livres e devolve Marvin à posição inicial.
 
-def test_movimento_contra_a_borda_e_invalido():
-    """Sair da grade penaliza com -5 e mantém a posição."""
-    ambiente = criar_ambiente_vazio()
-    for acao in (Acao.norte, Acao.oeste):
-        _, recompensa, _, resultado = ambiente.passo(acao)
-        assert recompensa == -5.0
-        assert resultado == ResultadoPasso.movimento_invalido
-        assert ambiente.posicao == (0, 0)
+        Returns:
+            Índice do estado percebido na posição inicial.
+        """
+        self.grade = np.full(self.paredes.shape, Celula.vazio, dtype=np.int8)
+        self.grade[self.paredes] = Celula.parede
 
+        sorteio = self.gerador.random(self.paredes.shape)
+        tem_lixo = (~self.paredes) & (sorteio < self.configuracao.densidade_de_lixo)
+        self.grade[tem_lixo] = Celula.lixo
 
-def test_movimento_contra_parede_e_invalido():
-    """Andar em direção a uma parede penaliza com -5 e mantém a posição."""
-    ambiente = criar_ambiente_vazio()
-    ambiente.grade[0, 1] = Celula.parede
+        self.posicao = tuple(self.configuracao.posicao_inicial)
+        self.passo_atual = 0
+        return self.obter_estado()
 
-    _, recompensa, _, resultado = ambiente.passo(Acao.leste)
+    @property
+    def quantidade_de_lixo_restante(self):
+        """Quantidade de células com lixo ainda presentes na grade."""
+        return int(np.sum(self.grade == Celula.lixo))
 
-    assert recompensa == -5.0
-    assert resultado == ResultadoPasso.movimento_invalido
-    assert ambiente.posicao == (0, 0)
+    def _conteudo_da_celula(self, coluna, linha):
+        """Lê o conteúdo de uma célula, tratando a área fora da grade como parede.
 
+        Args:
+            coluna: Coordenada x da célula.
+            linha: Coordenada y da célula.
 
-def test_movimento_valido_nao_tem_recompensa():
-    """Movimentos válidos e a ação parado rendem recompensa zero."""
-    ambiente = criar_ambiente_vazio()
+        Returns:
+            Valor de Celula da posição consultada.
+        """
+        tamanho = self.configuracao.tamanho_da_grade
+        if not (0 <= coluna < tamanho and 0 <= linha < tamanho):
+            return Celula.parede
+        return Celula(int(self.grade[linha, coluna]))
 
-    _, recompensa, _, _ = ambiente.passo(Acao.sul)
-    assert recompensa == 0.0
-    assert ambiente.posicao == (0, 1)
+    def obter_estado(self):
+        """Calcula a percepção de Marvin na posição atual.
 
-    _, recompensa, _, _ = ambiente.passo(Acao.parado)
-    assert recompensa == 0.0
-    assert ambiente.posicao == (0, 1)
+        Returns:
+            Índice do estado formado pela célula atual e pelas quatro vizinhas.
+        """
+        coluna, linha = self.posicao
+        conteudos = [self._conteudo_da_celula(coluna, linha)]
 
+        for acao in acoes_de_movimento:
+            deslocamento_x, deslocamento_y = deslocamento_por_acao[acao]
+            conteudos.append(
+                self._conteudo_da_celula(coluna + deslocamento_x, linha + deslocamento_y)
+            )
 
-def test_coleta_com_sucesso_remove_o_lixo():
-    """Coletar onde há lixo rende +10 e deixa a célula vazia."""
-    ambiente = criar_ambiente_vazio()
-    ambiente.grade[0, 0] = Celula.lixo
+        return codificar_percepcao(*conteudos)
 
-    _, recompensa, _, resultado = ambiente.passo(Acao.coletar)
+    def passo(self, acao):
+        """Executa uma ação e avança o ambiente em um passo.
 
-    assert recompensa == 10.0
-    assert resultado == ResultadoPasso.coleta_com_sucesso
-    assert ambiente.grade[0, 0] == Celula.vazio
+        O fim do episódio por limite de tempo é apenas um truncamento, e não um
+        estado terminal. Por isso, o agente deve manter o termo de bootstrapping
+        da Eq. (2) mesmo quando terminado for verdadeiro.
 
+        Args:
+            acao: Ação a executar, como Acao ou inteiro equivalente.
 
-def test_coleta_sem_lixo_penaliza():
-    """Coletar em célula vazia rende -1."""
-    ambiente = criar_ambiente_vazio()
+        Returns:
+            Tupla (novo_estado, recompensa, terminado, resultado), em que
+            terminado indica que o horizonte H foi atingido e resultado é um
+            ResultadoPasso usado para contar eventos.
 
-    _, recompensa, _, resultado = ambiente.passo(Acao.coletar)
+        Raises:
+            RuntimeError: Se o episódio já terminou e reset() não foi chamado.
+        """
+        if self.passo_atual >= self.configuracao.passos_por_episodio:
+            raise RuntimeError("O episódio terminou, chame reset() antes de continuar")
 
-    assert recompensa == -1.0
-    assert resultado == ResultadoPasso.coleta_sem_lixo
+        acao = Acao(acao)
 
+        # A ação aleatória vira um movimento em uma direção sorteada uniformemente
+        if acao == Acao.aleatoria:
+            indice_da_direcao = self.gerador.integers(len(acoes_de_movimento))
+            acao_efetiva = acoes_de_movimento[indice_da_direcao]
+        else:
+            acao_efetiva = acao
 
-def test_percepcao_reflete_vizinhanca():
-    """O estado codifica a célula atual e as quatro vizinhas."""
-    ambiente = criar_ambiente_vazio()
-    ambiente.posicao = (5, 5)
-    ambiente.grade[5, 5] = Celula.lixo
-    ambiente.grade[4, 5] = Celula.parede
-    ambiente.grade[6, 5] = Celula.lixo
+        if acao_efetiva == Acao.coletar:
+            recompensa, resultado = self._coletar()
+        elif acao_efetiva == Acao.parado:
+            recompensa, resultado = self.recompensas.demais_transicoes, ResultadoPasso.outro
+        else:
+            recompensa, resultado = self._mover(acao_efetiva)
 
-    percepcao = decodificar_percepcao(ambiente.obter_estado())
+        self.passo_atual += 1
+        terminado = self.passo_atual >= self.configuracao.passos_por_episodio
+        return self.obter_estado(), recompensa, terminado, resultado
 
-    assert percepcao == (Celula.lixo, Celula.parede, Celula.lixo, Celula.vazio, Celula.vazio)
+    def _coletar(self):
+        """Tenta coletar o lixo da célula atual.
 
+        Returns:
+            Tupla (recompensa, resultado) da tentativa de coleta.
+        """
+        coluna, linha = self.posicao
 
-def test_borda_e_percebida_como_parede():
-    """Fora da grade, o sensor lê parede."""
-    ambiente = criar_ambiente_vazio()
+        if self.grade[linha, coluna] == Celula.lixo:
+            self.grade[linha, coluna] = Celula.vazio
+            return self.recompensas.coleta_com_sucesso, ResultadoPasso.coleta_com_sucesso
 
-    percepcao = decodificar_percepcao(ambiente.obter_estado())
+        return self.recompensas.coleta_sem_lixo, ResultadoPasso.coleta_sem_lixo
 
-    assert percepcao == (Celula.vazio, Celula.parede, Celula.vazio, Celula.vazio, Celula.parede)
+    def _mover(self, direcao):
+        """Tenta mover Marvin uma célula na direção indicada.
 
+        Args:
+            direcao: Uma das quatro ações de movimento.
 
-def test_acao_aleatoria_move_uma_celula_no_interior_da_grade():
-    """Longe das bordas, a ação aleatória sempre desloca uma célula."""
-    ambiente = criar_ambiente_vazio()
-    ambiente.posicao = (25, 25)
+        Returns:
+            Tupla (recompensa, resultado) do movimento. Em caso de parede ou
+            borda, Marvin permanece na mesma célula.
+        """
+        coluna, linha = self.posicao
+        deslocamento_x, deslocamento_y = deslocamento_por_acao[direcao]
+        nova_coluna = coluna + deslocamento_x
+        nova_linha = linha + deslocamento_y
 
-    for _ in range(20):
-        coluna_antes, linha_antes = ambiente.posicao
-        _, recompensa, _, _ = ambiente.passo(Acao.aleatoria)
-        coluna_depois, linha_depois = ambiente.posicao
+        if self._conteudo_da_celula(nova_coluna, nova_linha) == Celula.parede:
+            return self.recompensas.movimento_invalido, ResultadoPasso.movimento_invalido
 
-        distancia = abs(coluna_depois - coluna_antes) + abs(linha_depois - linha_antes)
-        assert distancia == 1
-        assert recompensa == 0.0
-
-
-def test_acao_aleatoria_cobre_as_quatro_direcoes():
-    """Todas as direções aparecem em muitos sorteios."""
-    ambiente = criar_ambiente_vazio(passos_por_episodio=10_000)
-    deslocamentos = set()
-
-    for _ in range(200):
-        ambiente.posicao = (25, 25)
-        ambiente.passo(Acao.aleatoria)
-        deslocamentos.add((ambiente.posicao[0] - 25, ambiente.posicao[1] - 25))
-
-    assert deslocamentos == {(0, -1), (0, 1), (1, 0), (-1, 0)}
-
-
-def test_episodio_termina_no_horizonte_e_exige_reset():
-    """O último passo sinaliza o fim e novos passos exigem reset()."""
-    ambiente = criar_ambiente_vazio(passos_por_episodio=5)
-
-    for passo in range(5):
-        _, _, terminado, _ = ambiente.passo(Acao.parado)
-        assert terminado == (passo == 4)
-
-    with pytest.raises(RuntimeError):
-        ambiente.passo(Acao.parado)
-
-    ambiente.reset()
-    ambiente.passo(Acao.parado)
+        self.posicao = (nova_coluna, nova_linha)
+        return self.recompensas.demais_transicoes, ResultadoPasso.outro
