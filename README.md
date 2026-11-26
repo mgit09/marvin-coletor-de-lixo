@@ -10,7 +10,7 @@ Trabalho Prático III da disciplina Fundamentos de Inteligência Artificial (202
 
 - [x] Leitura do enunciado e definição da estrutura do projeto
 - [x] Tarefa 1: modelagem do problema como MDP
-- [ ] Tarefa 2: implementação do ambiente e do agente
+- [x] Tarefa 2: implementação do ambiente e do agente
 - [ ] Tarefa 3: treinamento e curvas de aprendizado
 - [ ] Tarefa 4: exploração versus explotação (varredura de ε e políticas de decaimento)
 - [ ] Tarefa 5: análise da política aprendida
@@ -60,6 +60,11 @@ source .venv/bin/activate        # Linux/macOS
 
 # Instalar dependências
 pip install -r requirements.txt
+```
+
+Para executar os testes, rode:
+```bash
+python -m pytest
 ```
 
 Os comandos de execução serão adicionados conforme os scripts forem implementados.
