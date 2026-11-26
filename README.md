@@ -9,7 +9,7 @@ Trabalho Prático III da disciplina Fundamentos de Inteligência Artificial (202
 > Atualizado em 25/11/2026
 
 - [x] Leitura do enunciado e definição da estrutura do projeto
-- [ ] Tarefa 1: modelagem do problema como MDP
+- [x] Tarefa 1: modelagem do problema como MDP
 - [ ] Tarefa 2: implementação do ambiente e do agente
 - [ ] Tarefa 3: treinamento e curvas de aprendizado
 - [ ] Tarefa 4: exploração versus explotação (varredura de ε e políticas de decaimento)
@@ -73,6 +73,3 @@ Os comandos de execução serão adicionados conforme os scripts forem implement
 5. Rodar os experimentos de exploração com α, γ, K e H fixos, agregando várias execuções com sementes diferentes.
 6. Extrair e analisar a política aprendida com a melhor configuração.
 7. Escrever o relatório e consolidar o notebook final.
-
-- (preencher)
-- (preencher)
