@@ -6,12 +6,12 @@ Trabalho Prático III da disciplina Fundamentos de Inteligência Artificial (202
 
 ## Status
 
-> Atualizado em 25/11/2026
+> Atualizado em 27/11/2026
 
 - [x] Leitura do enunciado e definição da estrutura do projeto
 - [x] Tarefa 1: modelagem do problema como MDP
 - [x] Tarefa 2: implementação do ambiente e do agente
-- [ ] Tarefa 3: treinamento e curvas de aprendizado
+- [x] Tarefa 3: treinamento e curvas de aprendizado
 - [ ] Tarefa 4: exploração versus explotação (varredura de ε e políticas de decaimento)
 - [ ] Tarefa 5: análise da política aprendida
 - [ ] Relatório em PDF (máximo de 6 páginas)
