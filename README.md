@@ -11,6 +11,7 @@ Trabalho Prático III da disciplina Fundamentos de Inteligência Artificial (202
 - [x] Leitura do enunciado e definição da estrutura do projeto
 - [x] Tarefa 1: modelagem do problema como MDP
 - [x] Tarefa 2: implementação do ambiente e do agente
+- [x] Estudo de sensibilidade e congelamento dos hiperparâmetros (α = 0,1; γ = 0,9; Q₀ = 0,0; N = 10)
 - [x] Tarefa 3: treinamento e curvas de aprendizado
 - [ ] Tarefa 4: exploração versus explotação (varredura de ε e políticas de decaimento)
 - [ ] Tarefa 5: análise da política aprendida
@@ -29,25 +30,26 @@ Recompensas: +10 ao coletar lixo, −1 ao tentar coletar onde não há lixo, −
 marvin-coletor-de-lixo/
 ├── README.md
 ├── requirements.txt
+├── pytest.ini
 ├── .gitignore
 ├── docs/                      # Enunciado e material de apoio
 ├── src/                       # Código-fonte (módulos reutilizáveis)
 │   ├── __init__.py
-│   ├── configuracao.py        # Hiperparâmetros e constantes (α, γ, K, H, densidade, sementes)
+│   ├── configuracao.py        # Hiperparâmetros e constantes (α, γ, Q₀, K, H, densidade, sementes)
 │   ├── ambiente.py            # Classe Ambiente: grade, transição, recompensa, reset
 │   ├── agente.py              # Classe AgenteQLearning: Q-table, ε-greedy, atualização
 │   ├── agendas_epsilon.py     # Agendas de ε: constante, exponencial, harmônica
-│   ├── treinamento.py         # Laço de treinamento e registro de métricas
-│   ├── experimentos.py        # Varredura de ε e comparação de agendas (Tarefa 4)
+│   ├── treinamento.py         # Laço de treinamento e agregação de múltiplas sementes
+│   ├── experimentos.py        # Sensibilidade, varredura de ε e comparação de agendas (Tarefa 4)
 │   ├── politica.py            # Extração e análise da política aprendida (Tarefa 5)
-│   └── graficos.py            # Curvas de aprendizado, médias móveis, tabelas
-├── scripts/                   # Pontos de entrada para rodar cada tarefa
+│   └── graficos.py            # Curvas de aprendizado, médias móveis, sensibilidade e tabelas
+├── scripts/                   # Pontos de entrada para rodar cada etapa
+│   ├── executar_sensibilidade.py
 │   ├── executar_treinamento.py
 │   └── executar_experimentos.py
 ├── notebooks/                 # Notebook final entregável (.ipynb)
-├── resultados/                # Saídas geradas (figuras, tabelas, arquivos .npy/.csv)
-├── relatorio/                 # Fontes e PDF do relatório
-└── testes/                    # Testes do ambiente e do agente
+├── resultados/                # Saídas geradas localmente (ignoradas pelo Git)
+└── testes/                    # Testes unitários dos módulos
 ```
 
 ## Como executar
@@ -62,12 +64,17 @@ source .venv/bin/activate        # Linux/macOS
 pip install -r requirements.txt
 ```
 
-Para executar os testes, rode:
+Para executar os testes unitários:
 ```bash
 python -m pytest
 ```
 
-Os comandos de execução serão adicionados conforme os scripts forem implementados.
+Para executar o estudo de sensibilidade dos hiperparâmetros (`α`, `γ` e `Q₀`) e gerar a tabela CSV e o gráfico em `resultados/`:
+```bash
+python scripts/executar_sensibilidade.py
+```
+
+Os demais comandos de execução serão adicionados conforme os scripts das próximas tarefas forem implementados.
 
 ## Plano de trabalho
 
