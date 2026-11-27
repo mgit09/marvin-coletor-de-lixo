@@ -11,7 +11,6 @@ Trabalho Prático III da disciplina Fundamentos de Inteligência Artificial (202
 - [x] Leitura do enunciado e definição da estrutura do projeto
 - [x] Tarefa 1: modelagem do problema como MDP
 - [x] Tarefa 2: implementação do ambiente e do agente
-- [x] Estudo de sensibilidade e congelamento dos hiperparâmetros (α = 0,1; γ = 0,9; Q₀ = 0,0; N = 10)
 - [x] Tarefa 3: treinamento e curvas de aprendizado
 - [ ] Tarefa 4: exploração versus explotação (varredura de ε e políticas de decaimento)
 - [ ] Tarefa 5: análise da política aprendida
