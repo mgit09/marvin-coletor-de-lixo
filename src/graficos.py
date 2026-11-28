@@ -247,7 +247,10 @@ def plotar_comparacao_de_configuracoes(
     eixo.set_title(f"{titulo} (média móvel de {janela} episódios, {descricao})", loc="left", fontsize=10)
     eixo.set_xlabel("Episódio")
     eixo.set_ylabel("Recompensa total no episódio")
-    eixo.legend(loc="lower right", ncol=2 if len(agregados) > 3 else 1)
+
+    # Legenda fora da área de plotagem, para não cobrir as curvas
+    eixo.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    
     _finalizar(figura, caminho_de_saida)
     return figura
 
