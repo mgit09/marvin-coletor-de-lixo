@@ -6,12 +6,15 @@ import pytest
 from src.configuracao import ConfiguracaoAmbiente, ConfiguracaoTreinamento
 from src.experimentos import (
     AgregadoExperimento,
+    analisar_sensibilidade,
     executar_configuracao,
+    executar_sensibilidade_hiperparametros,
     formatar_numero,
+    montar_grade_sensibilidade,
     montar_tabela_de_sensibilidade,
     montar_tabela_resumo,
+    salvar_tabela_sensibilidade,
     tabela_em_latex,
-    analisar_sensibilidade,
     varredura_de_epsilon,
 )
 
@@ -148,3 +151,48 @@ def test_formatar_numero_usa_virgula():
     """O separador decimal é a vírgula."""
     assert formatar_numero(391.123, 1) == "391,1"
     assert formatar_numero(0.5, 2) == "0,50"
+
+
+def test_montar_grade_sensibilidade_gera_as_tres_varreduras():
+    """A grade marginal contém os candidatos para alpha, gamma e Q0 e compartilha a referência."""
+    pontos = montar_grade_sensibilidade(
+        taxas_de_aprendizado=(0.05, 0.1),
+        fatores_de_desconto=(0.5, 0.9),
+        valores_iniciais_q=(-5.0, 0.0),
+    )
+
+    assert len(pontos) == 6
+    chaves_unicas = {ponto.chave_configuracao for ponto in pontos}
+    # O ponto de referência (0,1; 0,9; 0,0) aparece nas três varreduras, restando 4 chaves únicas
+    assert len(chaves_unicas) == 4
+
+
+def test_executar_sensibilidade_marginal_reaproveita_referencia_e_salva_csv(tmp_path):
+    """O estudo marginal preenche todas as colunas, usa cache .npz e exporta CSV."""
+    pasta_cache = tmp_path / "dados"
+    tabela, agregados_por_chave = executar_sensibilidade_hiperparametros(
+        configuracao_referencia=CONFIGURACAO_TREINAMENTO,
+        configuracao_ambiente=CONFIGURACAO_AMBIENTE,
+        taxas_de_aprendizado=(0.05, 0.1),
+        fatores_de_desconto=(0.5, 0.9),
+        valores_iniciais_q=(-5.0, 0.0),
+        numero_de_execucoes=2,
+        janela_final=2,
+        numero_de_processos=1,
+        pasta_de_dados=pasta_cache,
+    )
+
+    assert len(tabela) == 6
+    assert len(agregados_por_chave) == 4
+    assert (pasta_cache / "sensibilidade_alfa_0_1_gama_0_9_q0_menos_5.npz").exists()
+
+    linhas_referencia = tabela[
+        (tabela["taxa_de_aprendizado"] == 0.1)
+        & (tabela["fator_de_desconto"] == 0.9)
+        & (tabela["valor_inicial_q"] == 0.0)
+    ]
+    assert len(linhas_referencia) == 3
+    assert linhas_referencia["recompensa_media_ultimos_50"].nunique() == 1
+
+    caminho_csv = salvar_tabela_sensibilidade(tabela, tmp_path / "sensibilidade.csv")
+    assert caminho_csv.exists()

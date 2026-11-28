@@ -28,6 +28,9 @@ JANELA_DA_RECOMPENSA_FINAL = 50
 VALORES_DE_EPSILON_DA_VARREDURA = (0.0, 0.01, 0.05, 0.1, 0.3, 1.0)
 TAXAS_DE_APRENDIZADO_DA_SENSIBILIDADE = (0.05, 0.1, 0.3)
 FATORES_DE_DESCONTO_DA_SENSIBILIDADE = (0.8, 0.9, 0.95)
+TAXAS_DE_APRENDIZADO_SENSIBILIDADE = (0.01, 0.05, 0.1, 0.3, 0.5, 0.8)
+FATORES_DE_DESCONTO_SENSIBILIDADE = (0.0, 0.5, 0.7, 0.9, 0.99)
+VALORES_INICIAIS_Q_SENSIBILIDADE = (-5.0, 0.0, 5.0, 10.0)
 
 construtores_de_agenda = {
     "constante": criar_agenda_constante,
@@ -311,9 +314,13 @@ def executar_configuracao(
     if numero_de_processos is None:
         numero_de_processos = min(os.cpu_count() or 1, numero_de_execucoes)
 
+    # Recorre ao modo sequencial caso o sistema restrinja semáforos de multiprocessamento
     if numero_de_processos > 1:
-        with ProcessPoolExecutor(max_workers=numero_de_processos) as executor:
-            resultados = list(executor.map(_treinar_uma_execucao, tarefas))
+        try:
+            with ProcessPoolExecutor(max_workers=numero_de_processos) as executor:
+                resultados = list(executor.map(_treinar_uma_execucao, tarefas))
+        except (PermissionError, OSError):
+            resultados = [_treinar_uma_execucao(tarefa) for tarefa in tarefas]
     else:
         resultados = [_treinar_uma_execucao(tarefa) for tarefa in tarefas]
 
@@ -527,3 +534,247 @@ def tabela_em_latex(tabela, titulo_da_primeira_coluna="Configuração"):
         linhas.append(" & ".join(celulas) + " \\\\")
     linhas += ["\\bottomrule", "\\end{tabular}", ""]
     return "\n".join(linhas)
+
+
+@dataclass(frozen=True)
+class PontoSensibilidade:
+    """Especificação de um ponto avaliado no estudo marginal de sensibilidade.
+
+    Attributes:
+        parametro_variado: Nome identificador do hiperparâmetro em análise.
+        valor_do_parametro: Valor numérico atribuído ao hiperparâmetro variado.
+        taxa_de_aprendizado: Valor de alpha utilizado neste ponto.
+        fator_de_desconto: Valor de gamma utilizado neste ponto.
+        valor_inicial_q: Valor de Q0 utilizado neste ponto.
+    """
+
+    parametro_variado: str
+    valor_do_parametro: float
+    taxa_de_aprendizado: float
+    fator_de_desconto: float
+    valor_inicial_q: float
+
+    @property
+    def chave_configuracao(self):
+        """Tupla única (alpha, gamma, Q0) para reutilizar execuções idênticas."""
+        return (
+            float(self.taxa_de_aprendizado),
+            float(self.fator_de_desconto),
+            float(self.valor_inicial_q),
+        )
+
+
+def _identificador_de_parametro(valor):
+    """Formata um número para compor identificadores de arquivo sem sinais especiais.
+
+    Args:
+        valor: Número real a converter em texto seguro para nome de arquivo.
+
+    Returns:
+        Texto em snake_case representando o valor numérico.
+    """
+    texto = f"{valor:g}".replace(".", "_")
+    if texto.startswith("-"):
+        return f"menos_{texto[1:]}"
+    return texto
+
+
+def montar_grade_sensibilidade(
+    configuracao_referencia=None,
+    taxas_de_aprendizado=TAXAS_DE_APRENDIZADO_SENSIBILIDADE,
+    fatores_de_desconto=FATORES_DE_DESCONTO_SENSIBILIDADE,
+    valores_iniciais_q=VALORES_INICIAIS_Q_SENSIBILIDADE,
+):
+    """Constrói os pontos do estudo marginal de sensibilidade variando um parâmetro por vez.
+
+    Args:
+        configuracao_referencia: Configuração central de referência. Usa o padrão se for None.
+        taxas_de_aprendizado: Valores candidatos para alpha.
+        fatores_de_desconto: Valores candidatos para gamma.
+        valores_iniciais_q: Valores candidatos para Q0.
+
+    Returns:
+        Lista ordenada de instâncias de PontoSensibilidade.
+    """
+    referencia = configuracao_referencia or ConfiguracaoTreinamento()
+    pontos = []
+
+    for taxa in taxas_de_aprendizado:
+        pontos.append(
+            PontoSensibilidade(
+                parametro_variado="taxa_de_aprendizado",
+                valor_do_parametro=float(taxa),
+                taxa_de_aprendizado=float(taxa),
+                fator_de_desconto=float(referencia.fator_de_desconto),
+                valor_inicial_q=float(referencia.valor_inicial_q),
+            )
+        )
+
+    for desconto in fatores_de_desconto:
+        pontos.append(
+            PontoSensibilidade(
+                parametro_variado="fator_de_desconto",
+                valor_do_parametro=float(desconto),
+                taxa_de_aprendizado=float(referencia.taxa_de_aprendizado),
+                fator_de_desconto=float(desconto),
+                valor_inicial_q=float(referencia.valor_inicial_q),
+            )
+        )
+
+    for valor_q in valores_iniciais_q:
+        pontos.append(
+            PontoSensibilidade(
+                parametro_variado="valor_inicial_q",
+                valor_do_parametro=float(valor_q),
+                taxa_de_aprendizado=float(referencia.taxa_de_aprendizado),
+                fator_de_desconto=float(referencia.fator_de_desconto),
+                valor_inicial_q=float(valor_q),
+            )
+        )
+
+    return pontos
+
+
+def _resumir_ponto_sensibilidade(ponto, agregado, janela_final=JANELA_DA_RECOMPENSA_FINAL):
+    """Extrai o dicionário de métricas resumidas para uma linha da tabela de sensibilidade.
+
+    Args:
+        ponto: Instância de PontoSensibilidade avaliada.
+        agregado: AgregadoExperimento correspondente ao ponto.
+        janela_final: Quantidade de episódios finais usados na média estacionária.
+
+    Returns:
+        Dicionário com parâmetros e estatísticas agregadas do ponto.
+    """
+    medias_finais = agregado.recompensa_media_final_por_execucao(janela_final)
+    melhores = agregado.melhor_recompensa_por_execucao
+    porcentagens = 100.0 * agregado.fracao_visitada_final_por_execucao
+    lixos_finais = agregado.lixos_coletados_por_episodio[:, -janela_final:].mean(axis=1)
+    malsucedidas_finais = agregado.coletas_malsucedidas_por_episodio[:, -janela_final:].mean(axis=1)
+    invalidos_finais = agregado.movimentos_invalidos_por_episodio[:, -janela_final:].mean(axis=1)
+
+    return {
+        "parametro_variado": ponto.parametro_variado,
+        "valor_do_parametro": ponto.valor_do_parametro,
+        "taxa_de_aprendizado": ponto.taxa_de_aprendizado,
+        "fator_de_desconto": ponto.fator_de_desconto,
+        "valor_inicial_q": ponto.valor_inicial_q,
+        "numero_de_execucoes": agregado.numero_de_execucoes,
+        "recompensa_media_ultimos_50": float(medias_finais.mean()),
+        "desvio_recompensa_ultimos_50": _desvio_padrao(medias_finais),
+        "melhor_recompensa_media": float(melhores.mean()),
+        "desvio_melhor_recompensa": _desvio_padrao(melhores),
+        "porcentagem_visitada_media": float(porcentagens.mean()),
+        "desvio_porcentagem_visitada": _desvio_padrao(porcentagens),
+        "lixos_medios_ultimos_50": float(lixos_finais.mean()),
+        "coletas_malsucedidas_medias_ultimos_50": float(malsucedidas_finais.mean()),
+        "movimentos_invalidos_medios_ultimos_50": float(invalidos_finais.mean()),
+    }
+
+
+def executar_sensibilidade_hiperparametros(
+    configuracao_referencia=None,
+    configuracao_ambiente=None,
+    epsilon_fixo=0.1,
+    taxas_de_aprendizado=TAXAS_DE_APRENDIZADO_SENSIBILIDADE,
+    fatores_de_desconto=FATORES_DE_DESCONTO_SENSIBILIDADE,
+    valores_iniciais_q=VALORES_INICIAIS_Q_SENSIBILIDADE,
+    numero_de_execucoes=10,
+    janela_final=JANELA_DA_RECOMPENSA_FINAL,
+    numero_de_processos=None,
+    pasta_de_dados=None,
+):
+    """Executa o estudo marginal de sensibilidade para alpha, gamma e Q0 com sementes pareadas.
+
+    Combinações idênticas ao ponto de referência são simuladas uma única vez e
+    reaproveitadas nas três curvas marginais, usando a infraestrutura de cache
+    de AgregadoExperimento.
+
+    Args:
+        configuracao_referencia: Hiperparâmetros centrais de referência. Usa o padrão se None.
+        configuracao_ambiente: Parâmetros do ambiente. Usa o padrão se None.
+        epsilon_fixo: Valor de epsilon constante usado durante o estudo.
+        taxas_de_aprendizado: Valores avaliados para alpha.
+        fatores_de_desconto: Valores avaliados para gamma.
+        valores_iniciais_q: Valores avaliados para Q0.
+        numero_de_execucoes: Quantidade de execuções independentes por configuração.
+        janela_final: Quantidade de episódios finais usados para resumir o desempenho.
+        numero_de_processos: Processos em paralelo. Usa o número de núcleos se for None.
+        pasta_de_dados: Pasta opcional para salvar e reaproveitar arquivos .npz.
+
+    Returns:
+        Tupla (tabela_resumo, agregados_por_chave), em que tabela_resumo é um
+        DataFrame com todas as métricas e agregados_por_chave mapeia cada tupla
+        (alpha, gamma, Q0) ao respectivo AgregadoExperimento.
+    """
+    referencia = configuracao_referencia or ConfiguracaoTreinamento()
+    ambiente = configuracao_ambiente or ConfiguracaoAmbiente()
+
+    pontos = montar_grade_sensibilidade(
+        configuracao_referencia=referencia,
+        taxas_de_aprendizado=taxas_de_aprendizado,
+        fatores_de_desconto=fatores_de_desconto,
+        valores_iniciais_q=valores_iniciais_q,
+    )
+
+    # Simula cada combinação única (alpha, gamma, Q0) uma só vez
+    agregados_por_chave = {}
+    for ponto in pontos:
+        chave = ponto.chave_configuracao
+        if chave in agregados_por_chave:
+            continue
+
+        taxa, desconto, valor_q = chave
+        configuracao_item = replace(
+            referencia,
+            taxa_de_aprendizado=taxa,
+            fator_de_desconto=desconto,
+            valor_inicial_q=valor_q,
+        )
+        nome = (
+            f"α = {_formatar_parametro(taxa)}, "
+            f"γ = {_formatar_parametro(desconto)}, "
+            f"Q₀ = {_formatar_parametro(valor_q)}"
+        )
+        identificador = (
+            f"sensibilidade_alfa_{_identificador_de_parametro(taxa)}"
+            f"_gama_{_identificador_de_parametro(desconto)}"
+            f"_q0_{_identificador_de_parametro(valor_q)}"
+        )
+        agregados_por_chave[chave] = executar_configuracao(
+            nome=nome,
+            identificador=identificador,
+            nome_da_agenda="constante",
+            parametros_da_agenda={"epsilon": float(epsilon_fixo)},
+            numero_de_execucoes=numero_de_execucoes,
+            configuracao_treinamento=configuracao_item,
+            configuracao_ambiente=ambiente,
+            numero_de_processos=numero_de_processos,
+            pasta_de_dados=pasta_de_dados,
+        )
+
+    linhas = [
+        _resumir_ponto_sensibilidade(
+            ponto=ponto,
+            agregado=agregados_por_chave[ponto.chave_configuracao],
+            janela_final=janela_final,
+        )
+        for ponto in pontos
+    ]
+    return pd.DataFrame(linhas), agregados_por_chave
+
+
+def salvar_tabela_sensibilidade(tabela_resumo, caminho_arquivo):
+    """Salva a tabela resumida do estudo de sensibilidade em formato CSV.
+
+    Args:
+        tabela_resumo: DataFrame retornado por executar_sensibilidade_hiperparametros.
+        caminho_arquivo: Caminho de destino do arquivo CSV.
+
+    Returns:
+        Objeto Path do arquivo salvo.
+    """
+    destino = Path(caminho_arquivo)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    tabela_resumo.to_csv(destino, index=False, float_format="%.4f")
+    return destino

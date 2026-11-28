@@ -10,9 +10,10 @@ import pytest  # noqa: E402
 
 from src.configuracao import ConfiguracaoAmbiente, ConfiguracaoTreinamento  # noqa: E402
 from src.experimentos import (  # noqa: E402
-    executar_configuracao,
-    montar_tabela_de_sensibilidade,
     analisar_sensibilidade,
+    executar_configuracao,
+    executar_sensibilidade_hiperparametros,
+    montar_tabela_de_sensibilidade,
 )
 from src.graficos import (  # noqa: E402
     calcular_media_movel,
@@ -20,6 +21,7 @@ from src.graficos import (  # noqa: E402
     plotar_curva_de_aprendizado,
     plotar_mapa_de_sensibilidade,
     plotar_metricas_de_diagnostico,
+    plotar_sensibilidade_hiperparametros,
 )
 
 
@@ -116,4 +118,39 @@ def test_mapa_de_sensibilidade_salva_o_arquivo(tmp_path):
     figura = plotar_mapa_de_sensibilidade(tabela, tmp_path / "mapa.png")
 
     assert (tmp_path / "mapa.png").exists()
+    plt.close(figura)
+
+
+def test_media_movel_rejeita_parametros_invalidos():
+    """Janela não positiva ou série vazia geram ValueError."""
+    with pytest.raises(ValueError):
+        calcular_media_movel([1.0, 2.0], janela=0)
+    with pytest.raises(ValueError):
+        calcular_media_movel([], janela=5)
+
+
+def test_painel_sensibilidade_hiperparametros_salva_arquivo(tmp_path):
+    """O painel triplo de sensibilidade é gerado e salvo em PNG."""
+    configuracao_referencia = ConfiguracaoTreinamento(numero_de_episodios=3)
+    tabela, _ = executar_sensibilidade_hiperparametros(
+        configuracao_referencia=configuracao_referencia,
+        configuracao_ambiente=ConfiguracaoAmbiente(passos_por_episodio=40),
+        taxas_de_aprendizado=(0.05, 0.1),
+        fatores_de_desconto=(0.5, 0.9),
+        valores_iniciais_q=(-5.0, 0.0),
+        numero_de_execucoes=2,
+        janela_final=2,
+        numero_de_processos=1,
+    )
+
+    destino = tmp_path / "sensibilidade_painel.png"
+    figura = plotar_sensibilidade_hiperparametros(
+        tabela_resumo=tabela,
+        configuracao_referencia=configuracao_referencia,
+        passos_por_episodio=40,
+        caminho_de_saida=destino,
+    )
+
+    assert len(figura.axes) == 3
+    assert destino.exists() and destino.stat().st_size > 0
     plt.close(figura)

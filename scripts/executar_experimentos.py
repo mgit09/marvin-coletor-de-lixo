@@ -9,31 +9,37 @@ calculadas são carregadas em vez de treinadas outra vez.
 """
 
 import argparse
-import time
 from pathlib import Path
+import sys
+import time
 
-import matplotlib
+RAIZ_DO_PROJETO = Path(__file__).resolve().parent.parent
+if str(RAIZ_DO_PROJETO) not in sys.path:
+    sys.path.insert(0, str(RAIZ_DO_PROJETO))
+
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
+from src.configuracao import ConfiguracaoAmbiente, ConfiguracaoTreinamento  # noqa: E402
 from src.experimentos import (  # noqa: E402
     comparar_agendas,
-    montar_tabela_de_sensibilidade,
+    executar_sensibilidade_hiperparametros,
     montar_tabela_resumo,
+    salvar_tabela_sensibilidade,
     tabela_em_latex,
-    analisar_sensibilidade,
     varredura_de_epsilon,
 )
 from src.graficos import (  # noqa: E402
     plotar_comparacao_de_configuracoes,
     plotar_curva_de_aprendizado,
-    plotar_mapa_de_sensibilidade,
     plotar_metricas_de_diagnostico,
+    plotar_sensibilidade_hiperparametros,
 )
 
-PASTA_DE_RESULTADOS = Path(__file__).resolve().parent.parent / "resultados"
+PASTA_DE_RESULTADOS = RAIZ_DO_PROJETO / "resultados"
 PASTA_DE_DADOS = PASTA_DE_RESULTADOS / "dados"
 PASTA_DE_FIGURAS = PASTA_DE_RESULTADOS / "figuras"
 PASTA_DE_TABELAS = PASTA_DE_RESULTADOS / "tabelas"
@@ -54,7 +60,10 @@ def ler_argumentos():
     )
     analisador.add_argument("--execucoes", type=int, default=10, help="Execuções por configuração")
     analisador.add_argument(
-        "--execucoes-sensibilidade", type=int, default=5, help="Execuções por configuração no teste de sensibilidade"
+        "--execucoes-sensibilidade",
+        type=int,
+        default=None,
+        help="Execuções por configuração no estudo de sensibilidade (padrão: mesmo valor de --execucoes)",
     )
     analisador.add_argument("--processos", type=int, default=None, help="Processos em paralelo")
     return analisador.parse_args()
@@ -76,21 +85,40 @@ def salvar_tabela(tabela, nome_do_arquivo, titulo_da_primeira_coluna=None):
 
 
 def executar_sensibilidade(argumentos):
-    """Executa o teste de sensibilidade de alpha e gamma.
+    """Executa o estudo marginal de sensibilidade para alpha, gamma e Q0.
 
     Args:
         argumentos: Argumentos lidos da linha de comando.
     """
-    agregados = analisar_sensibilidade(
-        numero_de_execucoes=argumentos.execucoes_sensibilidade,
+    configuracao_referencia = ConfiguracaoTreinamento()
+    configuracao_ambiente = ConfiguracaoAmbiente()
+    execucoes = (
+        argumentos.execucoes_sensibilidade
+        if argumentos.execucoes_sensibilidade is not None
+        else getattr(argumentos, "execucoes", 10)
+    )
+
+    tabela_resumo, _ = executar_sensibilidade_hiperparametros(
+        configuracao_referencia=configuracao_referencia,
+        configuracao_ambiente=configuracao_ambiente,
+        epsilon_fixo=0.1,
+        numero_de_execucoes=execucoes,
         numero_de_processos=argumentos.processos,
         pasta_de_dados=PASTA_DE_DADOS,
     )
-    tabela = montar_tabela_de_sensibilidade(agregados)
-    salvar_tabela(tabela.set_index(["taxa_de_aprendizado", "fator_de_desconto"]), "sensibilidade")
-    figura = plotar_mapa_de_sensibilidade(tabela, PASTA_DE_FIGURAS / "sensibilidade.png")
+    salvar_tabela_sensibilidade(
+        tabela_resumo,
+        PASTA_DE_TABELAS / "sensibilidade_hiperparametros.csv",
+    )
+    figura = plotar_sensibilidade_hiperparametros(
+        tabela_resumo=tabela_resumo,
+        configuracao_referencia=configuracao_referencia,
+        passos_por_episodio=configuracao_ambiente.passos_por_episodio,
+        epsilon_fixo=0.1,
+        caminho_de_saida=PASTA_DE_FIGURAS / "sensibilidade_hiperparametros.png",
+    )
     plt.close(figura)
-    print(tabela.round(1).to_string(index=False))
+    print(tabela_resumo.round(2).to_string(index=False))
 
 
 def executar_varredura(argumentos):
@@ -131,16 +159,16 @@ def executar_agendas(argumentos):
     )
     plt.close(figura)
 
-    # A agenda exponencial serve de referência para as figuras da Tarefa 3
-    exponencial = next(agregado for nome, agregado in agregados.items() if nome.startswith("Exponencial"))
+    # A agenda constante (epsilon = 0,1) serve de linha de base para as figuras da Tarefa 3
+    constante = next(agregado for nome, agregado in agregados.items() if nome.startswith("Constante"))
     figura = plotar_curva_de_aprendizado(
-        exponencial.recompensa_por_episodio,
-        "Curva de aprendizado, agenda exponencial",
+        constante.recompensa_por_episodio,
+        "Curva de aprendizado, ε = 0,1 constante",
         caminho_de_saida=PASTA_DE_FIGURAS / "curva_de_aprendizado.png",
     )
     plt.close(figura)
     figura = plotar_metricas_de_diagnostico(
-        exponencial, caminho_de_saida=PASTA_DE_FIGURAS / "metricas_de_diagnostico.png"
+        constante, caminho_de_saida=PASTA_DE_FIGURAS / "metricas_de_diagnostico.png"
     )
     plt.close(figura)
     print(tabela.round(1).to_string())

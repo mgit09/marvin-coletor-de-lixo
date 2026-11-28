@@ -68,12 +68,12 @@ Para executar os testes unitários:
 python -m pytest
 ```
 
-Para executar o estudo de sensibilidade dos hiperparâmetros (`α`, `γ` e `Q₀`) e gerar a tabela CSV e o gráfico em `resultados/`:
+Para executar o estudo de sensibilidade dos hiperparâmetros (`α`, `γ` e `Q₀`), o treinamento de referência (Tarefa 3) ou os experimentos de exploração (Tarefa 4), salvando dados, tabelas e figuras em `resultados/`:
 ```bash
-python scripts/executar_sensibilidade.py
+python -m scripts.executar_sensibilidade
+python -m scripts.executar_treinamento --agenda constante --execucoes 10
+python -m scripts.executar_experimentos --etapa tudo --execucoes 10
 ```
-
-Os demais comandos de execução serão adicionados conforme os scripts das próximas tarefas forem implementados.
 
 ## Plano de trabalho
 

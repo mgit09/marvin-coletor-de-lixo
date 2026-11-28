@@ -1,7 +1,7 @@
-"""Treina Marvin com a configuração final e gera as figuras da Tarefa 3.
+"""Treina Marvin com a configuração de referência e gera as figuras da Tarefa 3.
 
 Uso, a partir da raiz do projeto:
-    python -m scripts.executar_treinamento --agenda exponencial --execucoes 10
+    python -m scripts.executar_treinamento --agenda constante --execucoes 10
 
 Os hiperparâmetros padrão vêm de src/configuracao.py. Depois do teste de
 sensibilidade, informe os valores escolhidos em --taxa-de-aprendizado e
@@ -10,8 +10,14 @@ sensibilidade, informe os valores escolhidos em --taxa-de-aprendizado e
 
 import argparse
 from dataclasses import replace
+from pathlib import Path
+import sys
 
-import matplotlib
+RAIZ_DO_PROJETO = Path(__file__).resolve().parent.parent
+if str(RAIZ_DO_PROJETO) not in sys.path:
+    sys.path.insert(0, str(RAIZ_DO_PROJETO))
+
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 
@@ -31,7 +37,7 @@ def ler_argumentos():
     """
     padrao = ConfiguracaoTreinamento()
     analisador = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    analisador.add_argument("--agenda", choices=("constante", "exponencial", "harmonica"), default="exponencial")
+    analisador.add_argument("--agenda", choices=("constante", "exponencial", "harmonica"), default="constante")
     analisador.add_argument("--epsilon", type=float, default=0.1, help="Valor de ε da agenda constante")
     analisador.add_argument("--taxa-de-aprendizado", type=float, default=padrao.taxa_de_aprendizado)
     analisador.add_argument("--fator-de-desconto", type=float, default=padrao.fator_de_desconto)

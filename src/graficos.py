@@ -60,8 +60,17 @@ def calcular_media_movel(valores, janela=JANELA_PADRAO):
     Returns:
         Vetor do mesmo tamanho da série, em que cada posição é a média dos
         últimos valores disponíveis, no máximo igual ao tamanho da janela.
+
+    Raises:
+        ValueError: Se a janela não for positiva ou a série for vazia.
     """
+    if janela <= 0:
+        raise ValueError("A janela da média móvel deve ser positiva")
+
     valores = np.asarray(valores, dtype=float)
+    if valores.ndim != 1 or valores.size == 0:
+        raise ValueError("A série deve ser unidimensional e não vazia")
+
     soma_acumulada = np.concatenate(([0.0], np.cumsum(valores)))
     fins = np.arange(1, len(valores) + 1)
     inicios = np.maximum(fins - janela, 0)
@@ -300,5 +309,113 @@ def plotar_mapa_de_sensibilidade(tabela_de_sensibilidade, caminho_de_saida=None)
     barra = figura.colorbar(imagem, ax=eixo)
     barra.set_label("Recompensa média (últimos 50 episódios)", color=COR_DO_TEXTO_SECUNDARIO)
     eixo.set_title(f"Sensibilidade a α e γ ({_descrever_execucoes(numero_de_execucoes)})", loc="left", fontsize=10)
+    _finalizar(figura, caminho_de_saida)
+    return figura
+
+
+def plotar_sensibilidade_hiperparametros(
+    tabela_resumo,
+    configuracao_referencia=None,
+    passos_por_episodio=1000,
+    epsilon_fixo=0.1,
+    caminho_de_saida=None,
+):
+    """Plota o painel triplo do estudo marginal de sensibilidade para alpha, gamma e Q0.
+
+    Args:
+        tabela_resumo: DataFrame produzido por executar_sensibilidade_hiperparametros.
+        configuracao_referencia: Configuração com os valores adotados para destaque visual.
+        passos_por_episodio: Horizonte H por episódio exibido no subtítulo.
+        epsilon_fixo: Valor de epsilon constante usado no estudo.
+        caminho_de_saida: Caminho do PNG, ou None para não salvar.
+
+    Returns:
+        Figura do matplotlib.
+    """
+    aplicar_estilo()
+
+    especificacoes = (
+        (
+            "taxa_de_aprendizado",
+            "(a) Sensibilidade à taxa de aprendizado",
+            "Taxa de aprendizado α (adimensional)",
+            configuracao_referencia.taxa_de_aprendizado if configuracao_referencia else 0.1,
+        ),
+        (
+            "fator_de_desconto",
+            "(b) Sensibilidade ao fator de desconto",
+            "Fator de desconto γ (adimensional)",
+            configuracao_referencia.fator_de_desconto if configuracao_referencia else 0.9,
+        ),
+        (
+            "valor_inicial_q",
+            "(c) Sensibilidade à inicialização da Q-table",
+            "Valor inicial Q₀ (pontos)",
+            configuracao_referencia.valor_inicial_q if configuracao_referencia else 0.0,
+        ),
+    )
+
+    numero_de_execucoes = int(tabela_resumo["numero_de_execucoes"].iloc[0])
+    numero_de_episodios = (
+        configuracao_referencia.numero_de_episodios if configuracao_referencia else 500
+    )
+    texto_epsilon = f"{epsilon_fixo:g}".replace(".", ",")
+
+    figura, eixos = plt.subplots(1, 3, figsize=(13.5, 4.0), sharey=True)
+
+    for indice, (chave_parametro, titulo_painel, rotulo_x, valor_escolhido) in enumerate(
+        especificacoes
+    ):
+        eixo = eixos[indice]
+        recorte = tabela_resumo[
+            tabela_resumo["parametro_variado"] == chave_parametro
+        ].sort_values("valor_do_parametro")
+
+        valores_x = recorte["valor_do_parametro"].to_numpy(dtype=float)
+        medias_y = recorte["recompensa_media_ultimos_50"].to_numpy(dtype=float)
+        desvios_y = recorte["desvio_recompensa_ultimos_50"].to_numpy(dtype=float)
+        texto_valor = f"{valor_escolhido:g}".replace(".", ",")
+
+        eixo.plot(
+            valores_x,
+            medias_y,
+            marker="o",
+            linewidth=2.0,
+            color=COR_PRINCIPAL,
+            label="Média dos últimos 50 episódios",
+        )
+        eixo.fill_between(
+            valores_x,
+            medias_y - desvios_y,
+            medias_y + desvios_y,
+            color=COR_PRINCIPAL,
+            alpha=0.16,
+            linewidth=0,
+            label="±1 desvio padrão",
+        )
+        eixo.axvline(
+            valor_escolhido,
+            color=CORES_CATEGORICAS[1],
+            linestyle="--",
+            linewidth=1.5,
+            label=f"Valor adotado ({texto_valor})",
+        )
+
+        eixo.set_title(titulo_painel, loc="left", fontsize=10)
+        eixo.set_xlabel(rotulo_x)
+        if indice == 0:
+            eixo.set_ylabel("Recompensa média por episódio (pontos)")
+        eixo.legend(loc="lower right", fontsize=8)
+
+    figura.suptitle(
+        f"Estudo de sensibilidade dos hiperparâmetros "
+        f"({_descrever_execucoes(numero_de_execucoes)}, "
+        f"K = {numero_de_episodios} episódios, H = {passos_por_episodio} passos, ε = {texto_epsilon})",
+        x=0.01,
+        ha="left",
+        fontsize=11,
+        y=1.02,
+    )
+    figura.tight_layout()
     _finalizar(figura, caminho_de_saida)
     return figura
